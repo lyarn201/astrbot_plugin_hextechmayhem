@@ -309,6 +309,9 @@ class ImageSizingTest(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(result), len(raw), "压缩后体积应明显小于 PNG 原图")
         self.assertTrue(renderer.last_render_meta["format"].startswith("JPEG"))
         self.assertEqual(renderer.last_render_meta["bytes"], len(result))
+        # 耗时用于日志排查，必须是数字
+        self.assertIsInstance(renderer.last_render_meta["ms"], int)
+        self.assertGreaterEqual(renderer.last_render_meta["ms"], 0)
 
 
 if __name__ == "__main__":

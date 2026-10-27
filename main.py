@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import re
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable
@@ -326,15 +327,25 @@ class HextechMayhemPlugin(Star):
 
     async def _load_images(self, urls: Iterable[str]) -> dict[str, str]:
         unique = [url for url in dict.fromkeys(urls) if url]
+        if not unique:
+            return {}
+        started = time.perf_counter()
         values = await asyncio.gather(
             *(self.service.image_data_uri(url) for url in unique),
             return_exceptions=True,
         )
-        return {
+        images = {
             url: value
             for url, value in zip(unique, values)
             if isinstance(value, str) and value
         }
+        logger.info(
+            "图标下载：请求 %d 张，成功 %d 张，耗时 %d ms",
+            len(unique),
+            len(images),
+            round((time.perf_counter() - started) * 1000),
+        )
+        return images
 
 
 def extract_command_query(event: AstrMessageEvent, fallback: str, subcommands: set[str]) -> str:
@@ -366,11 +377,12 @@ def image_from_bytes(data: bytes, meta: dict[str, Any] | None = None):
     """把渲染好的图片包装成可发送的消息段，并记录实际体积便于排查发送超时。"""
     if meta:
         logger.info(
-            "报告图片已生成：%s×%s，%d KB（%s）",
+            "报告图片已生成：%s×%s，%d KB（%s），渲染+压缩 %s ms",
             meta.get("width", "?"),
             meta.get("height", "?"),
             meta.get("kb", max(1, round(len(data) / 1024))),
             meta.get("format", "?"),
+            meta.get("ms", "?"),
         )
     else:
         logger.info("报告图片已生成：%d KB", max(1, round(len(data) / 1024)))

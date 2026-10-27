@@ -67,6 +67,12 @@
 		"default": 512,
 		"hint": "有效范围 128-3000。图片消息需要先上传到腾讯的富媒体 CDN，体积过大会导致 NapCat 报 sendMsg 超时。超过上限时按「保持 PNG → 降低 JPEG 质量 → 缩小尺寸」的顺序压缩；调小可提高发送成功率，调大可保留更多细节。"
 	},
+	"image_max_concurrent_requests": {
+		"description": "图标下载最大并发数",
+		"type": "int",
+		"default": 8,
+		"hint": "有效范围 1-32。一张英雄报告要拉几十张头像 / 装备 / 海克斯图标，并发过低会明显拉长首屏等待。与 API 请求的并发限制相互独立；若图标 CDN 出现限流可适当调小。"
+	},
 	"proxy": {
 		"description": "访问实时数据源时使用的 HTTP 代理",
 		"type": "string",

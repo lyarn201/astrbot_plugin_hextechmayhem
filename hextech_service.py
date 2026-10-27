@@ -101,6 +101,11 @@ class HextechService:
         self.cache_dir = self.data_dir / "cache" if self.data_dir is not None else None
         self._session: aiohttp.ClientSession | None = None
         self._semaphore = asyncio.Semaphore(config.max_concurrent_requests)
+        # 图标下载单独限流：一张英雄报告要拉几十张头像 / 装备 / 海克斯图标，
+        # 与 API 请求共用同一个低并发闸门会让首屏等待被拉长到十几秒。
+        self._image_semaphore = asyncio.Semaphore(
+            max(1, config.image_max_concurrent_requests)
+        )
         self._champions_lock = asyncio.Lock()
         self._augments_lock = asyncio.Lock()
         self._version_lock = asyncio.Lock()
@@ -505,7 +510,13 @@ class HextechService:
         if url in self._image_cache:
             return self._image_cache[url]
         try:
-            raw = await self._request_bytes(url, _IMAGE_LIMIT, ("image/",), require_trusted_final=True)
+            raw = await self._request_bytes(
+                url,
+                _IMAGE_LIMIT,
+                ("image/",),
+                require_trusted_final=True,
+                use_image_limiter=True,
+            )
             data_uri = normalize_image_data_uri(raw)
         except Exception:
             return ""
@@ -837,12 +848,14 @@ class HextechService:
         *,
         require_trusted_final: bool = False,
         headers: dict[str, str] | None = None,
+        use_image_limiter: bool = False,
     ) -> bytes:
         await self.initialize()
         if self._session is None:
             raise UpstreamUnavailable("HTTP 会话未初始化")
         target: str | URL = url
-        async with self._semaphore:
+        limiter = self._image_semaphore if use_image_limiter else self._semaphore
+        async with limiter:
             async with self._session.get(target, proxy=self.config.proxy or None, allow_redirects=True, headers=headers) as response:
                 response.raise_for_status()
                 final_url = str(response.url)

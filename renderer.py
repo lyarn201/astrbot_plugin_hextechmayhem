@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import html
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
@@ -35,11 +36,21 @@ _TIER_LABELS = {
 # 报告模板 body 背景色（#050914）。转 JPEG 前用它合成透明像素，
 # 保证视觉上与原图一致。
 _DOC_BACKGROUND = (5, 9, 20)
-# JPEG 质量阶梯：从高到低逐档尝试，命中体积上限即停止。
-_JPEG_QUALITIES = (92, 88, 84, 80, 76, 72, 68)
-# 缩尺寸的下限与步进：低于该宽度文本已经不可读，不再继续压缩。
+# 基准质量：体积靠「缩放」而不是「降质量」来控制。文字密集的报告里，
+# 保分辨率比保质量因子更划算，因此基准压到 72 换取更大的像素数。
+_BASE_QUALITY = 72
+# 体积还有余量时尝试提升到的质量档（只试一次，避免反复编码）。
+_QUALITY_BUMP = 82
+# 少量兜底质量档：缩到下限仍超限时使用。
+_FALLBACK_QUALITIES = (66, 60)
+# JPEG 体积对缩放比例的实测幂次（缩得越小，压缩收益越大于面积比）。
+# 用它反推达标所需缩放比例，避免像逐档试探那样反复编码。
+_SCALE_EXPONENT = 2.6
+# 不超过该像素数时才尝试无损 PNG。整页长图的 PNG 编码本身就要近一秒，
+# 且几乎必然超出体积上限，不值得尝试。
+_PNG_ATTEMPT_MAX_PIXELS = 1_500_000
+# 缩尺寸的下限：低于该宽度文本已经不可读，不再继续压缩。
 _MIN_WIDTH = 720
-_SCALE_STEP = 0.85
 
 
 class ReportRenderer:
@@ -403,9 +414,11 @@ class ReportRenderer:
             "scale": "device",
             "device_scale_factor_level": "normal",
         }
+        started = time.perf_counter()
         result = await render(source_html, {}, False, options)
         normalized = normalize_render_result(result)
         data, meta = finalize_image(normalized, max_kb=self.max_image_kb)
+        meta["ms"] = round((time.perf_counter() - started) * 1000)
         self.last_render_meta = meta
         return data
 
@@ -787,11 +800,20 @@ def finalize_image(
     发送的等待窗口内传不完，表现为
     ``Timeout: NTEvent ... NodeIKernelMsgService/sendMsg``。
 
-    压缩策略按「尽量少损失清晰度」排序：
+    控制体积的杠杆选择：
 
-    1. 体积已在上限内 → 原样保留 PNG（无损，小图最清晰）；
-    2. 超限 → 逐档降低 JPEG 质量（深色不透明报告转 JPEG 视觉差异很小）；
-    3. 最低质量仍超限 → 按比例缩小尺寸后重新压，直到 ``_MIN_WIDTH``。
+    * 体积已够小 → 保留无损 PNG；
+    * 超限 → **优先缩小尺寸**，而不是先降质量。报告是文字密集的整页长图，
+      同样字节预算下「更多像素 + 中等质量」比「更少像素 + 高质量」更易读；
+    * 缩到 ``_MIN_WIDTH`` 仍超限 → 才退到兜底质量。
+
+    性能约束（这张图有数百万像素，任何一次多余编码都要几百毫秒）：
+
+    * 大图不尝试 PNG：整页图的 PNG 编码本身就要近一秒，且几乎必然超出上限；
+    * ``optimize=True`` 多跑一遍 Huffman 统计，单次编码约 6 倍开销、只省 5%
+      体积，因此只在最终版本上付一次；
+    * 缩放比例由**一次探测编码**按 ``_SCALE_EXPONENT`` 反推，最多微调 2 次，
+      不做逐档质量试探。
 
     返回值第二项是体积信息（格式 / 宽 / 高 / 字节数），供调用方记录日志。
     """
@@ -806,29 +828,56 @@ def finalize_image(
                 PILImage.Resampling.LANCZOS,
             )
 
-        png = _encode_png(image)
-        if len(png) <= target:
-            return png, _image_meta("PNG", image, len(png))
+        # 1) 小图才值得尝试无损 PNG
+        if image.width * image.height <= _PNG_ATTEMPT_MAX_PIXELS:
+            png = _encode_png(image)
+            if len(png) <= target:
+                return png, _image_meta("PNG", image, len(png))
 
-        smallest = png
-        smallest_meta = _image_meta("PNG", image, len(png))
+        # 2) 一次探测，拿到该图的体积密度
+        probe = _encode_jpeg(image, _BASE_QUALITY, cheap=True)
+        if len(probe) <= target:
+            return _finish_image(image, probe, target)
+
+        # 3) 超限：按实测幂次反推缩放比例，最多微调两次
         current = image
-        for _ in range(6):
-            for quality in _JPEG_QUALITIES:
-                data = _encode_jpeg(current, quality)
-                meta = _image_meta(f"JPEG q{quality}", current, len(data))
-                if len(data) <= target:
-                    return data, meta
-                if len(data) < len(smallest):
-                    smallest, smallest_meta = data, meta
-            if current.width <= _MIN_WIDTH:
+        scale = min(1.0, (target / len(probe)) ** (1 / _SCALE_EXPONENT)) * 0.99
+        for _ in range(3):
+            width = max(_MIN_WIDTH, int(round(current.width * scale)))
+            if width >= current.width:
                 break
-            width = max(_MIN_WIDTH, int(current.width * _SCALE_STEP))
             height = max(1, round(current.height * width / current.width))
             current = current.resize((width, height), PILImage.Resampling.LANCZOS)
+            data = _encode_jpeg(current, _BASE_QUALITY, cheap=True)
+            if len(data) <= target:
+                return _finish_image(current, data, target)
+            scale = min(1.0, (target / len(data)) ** (1 / _SCALE_EXPONENT)) * 0.99
 
-        # 压到下限仍超限：返回最小的一版，交给调用方决定是否降级为文字。
-        return smallest, smallest_meta
+        # 4) 缩到下限仍超限：退到兜底质量，交给调用方决定是否降级为文字
+        for quality in _FALLBACK_QUALITIES:
+            data = _encode_jpeg(current, quality, cheap=True)
+            if len(data) <= target:
+                break
+        final_bytes = _encode_jpeg(current, quality, cheap=False)
+        return final_bytes, _image_meta(f"JPEG q{quality}", current, len(final_bytes))
+
+
+def _finish_image(
+    image: "PILImage.Image",
+    cheap_bytes: bytes,
+    target: int,
+) -> tuple[bytes, dict[str, Any]]:
+    """对已达标的版本做最终封装：有余量就提质量，并只付一次 optimize。"""
+    quality = _BASE_QUALITY
+    if len(cheap_bytes) < target * 0.8:
+        bumped = _encode_jpeg(image, _QUALITY_BUMP, cheap=True)
+        if len(bumped) <= target:
+            quality, cheap_bytes = _QUALITY_BUMP, bumped
+    final_bytes = _encode_jpeg(image, quality, cheap=False)
+    if len(final_bytes) > target and len(cheap_bytes) <= target:
+        # optimize 反而略超上限（罕见），退回未优化版本保证能发出去
+        final_bytes = cheap_bytes
+    return final_bytes, _image_meta(f"JPEG q{quality}", image, len(final_bytes))
 
 
 def _flatten_to_rgb(image: "PILImage.Image") -> "PILImage.Image":
@@ -850,9 +899,20 @@ def _encode_png(image: "PILImage.Image") -> bytes:
     return output.getvalue()
 
 
-def _encode_jpeg(image: "PILImage.Image", quality: int) -> bytes:
+def _encode_jpeg(image: "PILImage.Image", quality: int, *, cheap: bool) -> bytes:
+    """编码为渐进式 JPEG。
+
+    ``cheap=True`` 跳过 Huffman 统计（``optimize``），体积约大 5%，但单次编码
+    快得多；用于上限试探。最终版本用 ``cheap=False`` 换取更小体积。
+    """
     output = BytesIO()
-    image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+    image.save(
+        output,
+        format="JPEG",
+        quality=quality,
+        optimize=not cheap,
+        progressive=True,
+    )
     return output.getvalue()
 
 

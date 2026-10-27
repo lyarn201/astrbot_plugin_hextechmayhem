@@ -19,6 +19,7 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(config.max_augments_per_rarity, 5)
         self.assertEqual(config.winrate_rank_size, 10)
         self.assertEqual(config.image_max_kb, 512)
+        self.assertEqual(config.image_max_concurrent_requests, 8)
         self.assertEqual(config.mayhem_source, "aramgg")
         self.assertFalse(config.enable_mayhempedia_source)
 
@@ -41,6 +42,18 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(
             ServiceConfig.from_mapping({"image_max_kb": 1}).image_max_kb, 128
         )
+        self.assertEqual(
+            ServiceConfig.from_mapping(
+                {"image_max_concurrent_requests": 999}
+            ).image_max_concurrent_requests,
+            32,
+        )
+        self.assertEqual(
+            ServiceConfig.from_mapping(
+                {"image_max_concurrent_requests": 0}
+            ).image_max_concurrent_requests,
+            1,
+        )
 
     def test_schema_contains_all_public_settings(self) -> None:
         schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
@@ -58,6 +71,7 @@ class MetadataTest(unittest.TestCase):
                 "max_augments_per_rarity",
                 "winrate_rank_size",
                 "image_max_kb",
+                "image_max_concurrent_requests",
                 "proxy",
             },
         )
