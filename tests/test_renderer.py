@@ -46,7 +46,9 @@ def noisy_png(width: int = 1120, height: int = 1600) -> bytes:
 
 class RendererTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.renderer = ReportRenderer()
+        # 完整报告路径的用例，显式关掉精简模式
+        self.renderer = ReportRenderer(compact=False)
+        self.compact_renderer = ReportRenderer(compact=True)
         champion = ChampionDetail(
             id="Aatrox",
             key="266",
@@ -247,6 +249,36 @@ class RendererTest(unittest.IsolatedAsyncioTestCase):
         source = self.renderer.hero_html(self.report, {})
         self.assertIn("完整六件套", source)
         self.assertIn("测试路线", source)
+
+    def test_compact_hero_html_keeps_only_cover_and_augments(self) -> None:
+        source = self.compact_renderer.hero_html(self.report, {})
+        # 保留：英雄封面、三档海克斯推荐
+        self.assertIn("海克斯推荐", source)
+        self.assertIn("棱彩阶", source)
+        self.assertIn("暗裔剑魔", source)
+        # 精简掉：其余所有模块
+        for removed in (
+            "对局配置",
+            "召唤师技能",
+            "技能加点顺序",
+            "出门装",
+            "核心装备",
+            "流派与完整技能方案",
+            "三海克斯组合",
+            "热门单件表现",
+            "完整六件套",
+            "数据说明与相关攻略",
+            "机制补充",
+        ):
+            self.assertNotIn(removed, source, f"精简模式不应出现「{removed}」")
+
+    def test_compact_hero_html_is_much_shorter(self) -> None:
+        full = self.renderer.hero_html(self.report, {})
+        compact = self.compact_renderer.hero_html(self.report, {})
+        # CSS 是共用的固定开销，用区块数量衡量内容体量才准确
+        self.assertLessEqual(compact.count("<section"), 2)
+        self.assertGreater(full.count("<section"), 5)
+        self.assertLess(len(compact), len(full))
 
     def test_augment_html_renders_stats_when_present(self) -> None:
         item = Augment(

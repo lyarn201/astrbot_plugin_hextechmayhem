@@ -55,7 +55,10 @@ class HextechMayhemPlugin(Star):
         self.config: dict[str, Any] = config or {}
         data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
         self.service = HextechService(ServiceConfig.from_mapping(self.config), data_dir)
-        self.renderer = ReportRenderer(max_image_kb=self.service.config.image_max_kb)
+        self.renderer = ReportRenderer(
+            max_image_kb=self.service.config.image_max_kb,
+            compact=self.service.config.compact_hero_report,
+        )
         self._translation_cache: dict[str, str] = {}
         if "max_interactions" in self.config and "max_augments_per_rarity" not in self.config:
             logger.warning(
@@ -96,9 +99,15 @@ class HextechMayhemPlugin(Star):
                 )
             except Exception as error:
                 logger.exception("英雄报告渲染失败，降级为文字：%s", error)
-                yield event.plain_result(format_hero_text(report))
+                yield event.plain_result(
+                    format_hero_text(report, compact=self.renderer.compact)
+                )
                 return
-            await self._deliver_image(event, image_bytes, format_hero_text(report))
+            await self._deliver_image(
+                event,
+                image_bytes,
+                format_hero_text(report, compact=self.renderer.compact),
+            )
         except (AmbiguousChampion, HextechError) as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -317,6 +326,9 @@ class HextechMayhemPlugin(Star):
             for values in report.augments.values()
             for recommendation in values
         )
+        # 精简模式只渲染封面与海克斯，无需再下载出装 / 流派图标
+        if self.renderer.compact:
+            return await self._load_images(urls)
         for option in (*report.summoner_spells, *report.starter_items, *report.core_builds):
             urls.extend(_item_urls(option.items))
         urls.extend(_item_urls(report.boots))
@@ -480,7 +492,7 @@ def _clip_text(text: str, limit: int = _MAX_FALLBACK_CHARS) -> str:
     return value[:limit] + "\n…（内容过长已截断，图片发送失败时的兜底输出）"
 
 
-def format_hero_text(report: HeroReport) -> str:
+def format_hero_text(report: HeroReport, *, compact: bool = False) -> str:
     detail = report.champion
     suffix = f"｜旧缓存：{'、'.join(report.stale_sources)}" if report.stale_sources else ""
     lines = [
@@ -501,6 +513,9 @@ def format_hero_text(report: HeroReport) -> str:
                 lines.append(line)
         else:
             lines.append("- 暂无统计推荐")
+    # 精简模式与图片报告保持一致：海克斯推荐之后的内容不再输出
+    if compact:
+        return "\n".join(lines)
     lines.extend(["", "召唤师技能：", *_option_text(report.summoner_spells)])
     lines.append("技能加点顺序：" + (" → ".join(report.skill_order) if report.skill_order else "暂无数据"))
     lines.extend(["出门装：", *_option_text(report.starter_items)])

@@ -91,7 +91,7 @@
 | 指令 | 说明 | 示例 |
 | --- | --- | --- |
 | `/海斗胜率` | 输出胜率最高 TOP 与最低 BOTTOM 英雄（数量由 `winrate_rank_size` 控制，默认各 10 名） | `/海斗胜率` |
-| `/海斗 <英雄名>` | 生成英雄海克斯大乱斗完整图片报告（胜率、出装、海克斯适配） | `/海斗 Miss Fortune` |
+| `/海斗 <英雄名>` | 生成英雄图片报告。默认**只含英雄封面与三档海克斯推荐**（胜率见封面徽标） | `/海斗 Miss Fortune` |
 | `/海斗 <海克斯名>` | 英雄未命中时自动按海克斯检索并展示胜率 / 选取率 | `/海斗 珠光护手` |
 | `/海克斯 <海克斯名>` | 生成最多 5 条海克斯搜索图片卡片（含胜率、选取率、场次） | `/海克斯 珠光护手` |
 | `/海斗排名` | 生成英雄综合强度前 10 名图片卡片 | `/海斗排名` |
@@ -192,8 +192,14 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 > （Chromium 渲染整页 + 截图），它随**页面高度**和**内联图片数量**超线性增长。
 > 整页报告可能高达 8000 px、内联 50 张图，在 2 核容器上单次渲染可达 18 秒。
 >
-> 因此请优先用 `max_build_variants`（流派套数）控制页面高度：少一套流派就少
-> 一整块内容外加十余张内联装备图标。社区六件套在无数据时不再占版面。
+> 因此**默认开启 `compact_hero_report`**：英雄报告只渲染英雄封面与三档海克斯推荐
+> （2 个区块），不再渲染对局配置、流派、三海克斯组合、热门单件、六件套与数据说明
+> （共 8 个区块）。页面高度从约 8000 px 降到约 1100 px，内联图标从 50+ 张降到 20 张以内，
+> 像素量约为原来的 1/8 —— 这是当前环境里最有效的提速手段。
+>
+> 需要完整出装信息时把 `compact_hero_report` 设为 `false`；若只是想缩一点体积，
+> 也可以用 `max_build_variants`（流派套数）逐步调。
+
 
 
 以 1120×3000 的报告为参考（原始 PNG 约 5.1 MB）：
@@ -229,7 +235,8 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 | `mayhem_source` | 国内环境优先使用默认值 `aramgg`；无法使用 ARAMGG 时切换为 `opgg` |
 | `aramgg_api_key` | ARAMGG 模式必填；从开发者后台获取完整的 `hx_live_...` 密钥 |
 | `winrate_rank_size` | 默认 `10`，即 `/海斗胜率` 两端各显示 10 名；有效范围 3–50 |
-| `max_build_variants` | 默认 `2`。流派区块最占版面，套数越多渲染越慢；`0` 可整块隐藏 |
+| `compact_hero_report` | 默认 `true`。英雄报告只保留封面与海克斯推荐，渲染最快；关闭恢复完整报告 |
+| `max_build_variants` | 默认 `2`。仅在完整报告下生效：流派套数越多渲染越慢；`0` 可整块隐藏 |
 | `image_max_kb` | 默认 `512`。图片发送超时时调小（如 400）；想保留原分辨率可调到 900 |
 | `image_max_concurrent_requests` | 默认 `8`。首屏等待久可适当调大（上限 32）；图标 CDN 限流则调小 |
 | `llm_provider_id` | 可选；需要识别「奥巴马」「奶妈」等玩家黑话时再选择 Provider |
@@ -251,7 +258,8 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 | `max_results` | `5` | `/海克斯` 搜索最多展示条数；有效范围 1–10 |
 | `max_augments_per_rarity` | `5` | 英雄报告每个稀有度最多展示的海克斯数量；有效范围 1–10 |
 | `winrate_rank_size` | `10` | `/海斗胜率` 两端各显示的英雄数量；有效范围 3–50 |
-| `max_build_variants` | `2` | 英雄报告最多展示几套流派；有效范围 0–4，`0` 表示整块隐藏 |
+| `compact_hero_report` | `true` | 英雄报告只保留封面与海克斯推荐；关闭后恢复对局配置 / 流派 / 组合 / 单件 / 六件套等模块 |
+| `max_build_variants` | `2` | 完整报告最多展示几套流派；有效范围 0–4，`0` 表示整块隐藏 |
 | `image_max_kb` | `512` | 报告图片体积上限；有效范围 128–3000。超限时优先缩小尺寸，缩到下限才降质量 |
 | `image_max_concurrent_requests` | `8` | 图标下载并发数；有效范围 1–32。与 API 请求的并发限制相互独立 |
 | `proxy` | 空 | 访问实时数据源时使用的 HTTP 代理，例如 `http://127.0.0.1:7890` |

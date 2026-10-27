@@ -204,6 +204,7 @@ class ServiceConfig:
     max_augments_per_rarity: int = 5
     winrate_rank_size: int = 10
     max_build_variants: int = 2
+    compact_hero_report: bool = True
     image_max_kb: int = 512
     image_max_concurrent_requests: int = 8
     proxy: str = ""
@@ -238,6 +239,7 @@ class ServiceConfig:
             max_build_variants=_bounded_int(
                 data.get("max_build_variants"), 2, 0, 4
             ),
+            compact_hero_report=_as_bool(data.get("compact_hero_report"), True),
             image_max_kb=_bounded_int(
                 data.get("image_max_kb"), 512, 128, 3000
             ),

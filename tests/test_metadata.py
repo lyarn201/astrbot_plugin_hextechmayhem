@@ -21,6 +21,7 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(config.image_max_kb, 512)
         self.assertEqual(config.image_max_concurrent_requests, 8)
         self.assertEqual(config.max_build_variants, 2)
+        self.assertTrue(config.compact_hero_report)
         self.assertEqual(config.mayhem_source, "aramgg")
         self.assertFalse(config.enable_mayhempedia_source)
 
@@ -77,6 +78,7 @@ class MetadataTest(unittest.TestCase):
                 "max_results",
                 "max_augments_per_rarity",
                 "winrate_rank_size",
+                "compact_hero_report",
                 "max_build_variants",
                 "image_max_kb",
                 "image_max_concurrent_requests",

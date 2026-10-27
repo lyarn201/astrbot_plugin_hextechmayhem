@@ -311,7 +311,8 @@ class HextechService:
         return await self.opgg_data(champion, catalog)
 
     async def mayhempedia_routes(self, champion: ChampionSummary) -> DataResult:
-        if not self.config.enable_mayhempedia_source:
+        # 精简模式不渲染六件套，没必要为它多打一次境外 CDN 请求
+        if not self.config.enable_mayhempedia_source or self.config.compact_hero_report:
             return DataResult((), False, 0.0)
         key = champion.id
         lock = self._route_locks.setdefault(key, asyncio.Lock())

@@ -56,8 +56,10 @@ _MIN_WIDTH = 720
 class ReportRenderer:
     width = 1120
 
-    def __init__(self, max_image_kb: int = 512) -> None:
+    def __init__(self, max_image_kb: int = 512, compact: bool = True) -> None:
         self.max_image_kb = max(64, int(max_image_kb))
+        # 精简模式：英雄报告只保留封面与海克斯推荐，不再渲染出装 / 流派 / 组合等模块。
+        self.compact = bool(compact)
         # 最近一次渲染的体积信息，供调用方记录日志。
         self.last_render_meta: dict[str, Any] = {}
 
@@ -247,6 +249,28 @@ class ReportRenderer:
             augment_columns.append(
                 f'<div class="augment-column tier-{_tier_class(tier)}">'
                 f'<h3>{_safe(_tier_label(tier))}<span>{len(items)}</span></h3>{cards}</div>'
+            )
+
+        # 精简模式：只保留英雄封面与海克斯推荐。
+        # 报告主体本来能到六七千像素高，砍掉下方模块后 Chromium 的渲染时间和
+        # 内联图片数量都会成倍下降，是当前环境里最有效的一刀。
+        if self.compact:
+            return self._document(
+                title=f"{champion.name} · 海克斯乱斗",
+                body=f"""
+<section class="hero" style="{splash_style}">
+  <div class="eyebrow">HEXTECH MAYHEM</div>
+  <h1>{_safe(champion.name)}</h1>
+  <div class="subtitle">{_safe(champion.title)} · {_safe(champion.id)}</div>
+  <div class="badges">{''.join(badges)}</div>
+</section>
+{unavailable}
+<section>
+  <div class="section-title"><h2>海克斯推荐</h2><span>海斗信息源排序 · ARAMGG 资料</span></div>
+  <div class="augment-grid">{''.join(augment_columns)}</div>
+</section>
+<footer>英雄封面：Riot Data Dragon · 海克斯：ARAMGG / CommunityDragon · 非官方插件</footer>
+""",
             )
 
         mechanisms = []
