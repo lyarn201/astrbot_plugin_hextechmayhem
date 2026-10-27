@@ -49,7 +49,7 @@ class HextechMayhemPlugin(Star):
         self.config: dict[str, Any] = config or {}
         data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
         self.service = HextechService(ServiceConfig.from_mapping(self.config), data_dir)
-        self.renderer = ReportRenderer()
+        self.renderer = ReportRenderer(max_image_kb=self.service.config.image_max_kb)
         self._translation_cache: dict[str, str] = {}
         if "max_interactions" in self.config and "max_augments_per_rarity" not in self.config:
             logger.warning(
@@ -92,7 +92,7 @@ class HextechMayhemPlugin(Star):
                 logger.exception("英雄报告渲染失败，降级为文字：%s", error)
                 yield event.plain_result(format_hero_text(report))
                 return
-            yield event.chain_result([image_from_bytes(image_bytes)])
+            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
         except (AmbiguousChampion, HextechError) as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -150,7 +150,7 @@ class HextechMayhemPlugin(Star):
                     format_winrate_rankings(top, bottom, stale=stale, source=source)
                 )
                 return
-            yield event.chain_result([image_from_bytes(image_bytes)])
+            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
         except HextechError as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -203,7 +203,7 @@ class HextechMayhemPlugin(Star):
                 )
             )
             return
-        yield event.chain_result([image_from_bytes(image_bytes)])
+        yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
 
     @filter.command("海斗排名")
     async def hero_rankings(self, event: AstrMessageEvent):
@@ -226,7 +226,7 @@ class HextechMayhemPlugin(Star):
                     format_champion_rankings(rankings, stale=stale, source=source)
                 )
                 return
-            yield event.chain_result([image_from_bytes(image_bytes)])
+            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
         except HextechError as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -362,7 +362,18 @@ def parse_llm_json(raw: str) -> dict[str, Any]:
     return value
 
 
-def image_from_bytes(data: bytes):
+def image_from_bytes(data: bytes, meta: dict[str, Any] | None = None):
+    """把渲染好的图片包装成可发送的消息段，并记录实际体积便于排查发送超时。"""
+    if meta:
+        logger.info(
+            "报告图片已生成：%s×%s，%d KB（%s）",
+            meta.get("width", "?"),
+            meta.get("height", "?"),
+            meta.get("kb", max(1, round(len(data) / 1024))),
+            meta.get("format", "?"),
+        )
+    else:
+        logger.info("报告图片已生成：%d KB", max(1, round(len(data) / 1024)))
     encoded = base64.b64encode(data).decode("ascii")
     if hasattr(Comp.Image, "fromBase64"):
         return Comp.Image.fromBase64(encoded)

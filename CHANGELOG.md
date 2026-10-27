@@ -3,6 +3,35 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.2.1] - 2026-10-27
+
+### 修复
+
+- **图片发送超时**：QQ 的图片消息需要先上传到腾讯富媒体 CDN，NapCat 在约 10 秒的等待窗口内
+  等不到回调就会报
+  `Timeout: NTEvent serviceAndMethod:NodeIKernelMsgService/sendMsg`。
+  本插件的整页 PNG 报告通常有 3–6 MB，海外服务器或上传带宽受限时必然超时。
+  - 渲染后新增体积控制：体积上限内保留 PNG；超限逐档降低 JPEG 质量；
+    最低质量仍超限则按比例缩小尺寸（下限 720px）。
+  - 新增配置 `image_max_kb`（默认 `512`，范围 128–3000）。
+  - 每次渲染在日志打印实际体积与格式，便于按环境调整：
+    `报告图片已生成：952×2550，496 KB（JPEG q72）`。
+
+  参考数据（1120×3000 报告，原始 PNG 约 5.1 MB）：
+
+  | `image_max_kb` | 实际输出 | 质量 | 输出尺寸 |
+  | ---: | ---: | --- | --- |
+  | 300 | 273 KB | q76 | 720×1929 |
+  | 512 | 496 KB | q72 | 952×2550 |
+  | 700 | 631 KB | q80 | 952×2550 |
+  | 900 | 895 KB | q76 | 1120×3000 |
+
+### 新增
+
+- `renderer.finalize_image()`：体积控制入口，带透明通道时按模板背景色 `#050914` 合成。
+- 5 个测试覆盖：小图保留 PNG、大图压缩到上限、透明像素合成、极限目标不崩溃、
+  渲染链路应用配置上限。
+
 ## [1.2.0] - 2026-10-27
 
 基于 [muyikk/astrbot_plugin_hextechmayhem v1.1.1](https://github.com/muyikk/astrbot_plugin_hextechmayhem)

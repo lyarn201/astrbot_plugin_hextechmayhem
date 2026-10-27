@@ -203,6 +203,7 @@ class ServiceConfig:
     max_results: int = 5
     max_augments_per_rarity: int = 5
     winrate_rank_size: int = 10
+    image_max_kb: int = 512
     proxy: str = ""
 
     @classmethod
@@ -231,6 +232,9 @@ class ServiceConfig:
             ),
             winrate_rank_size=_bounded_int(
                 data.get("winrate_rank_size"), 10, 3, 50
+            ),
+            image_max_kb=_bounded_int(
+                data.get("image_max_kb"), 512, 128, 3000
             ),
             proxy=str(data.get("proxy") or "").strip(),
         )

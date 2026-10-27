@@ -4,7 +4,7 @@ desc: >-
   查询英雄联盟海克斯大乱斗英雄报告（胜率、出装、海克斯适配）、胜率榜（TOP / BOTTOM 双向）、
   综合强度排名与海克斯强化检索，并生成富文本图片报告。
 short_desc: 海克斯大乱斗胜率榜、英雄报告与海克斯查询。
-version: v1.2.0
+version: v1.2.1
 author: muyikk
 # 改造版（fork）仓库地址：请替换成你自己的 GitHub 仓库后再发布。
 repo: https://github.com/REPLACE-WITH-YOUR-ACCOUNT/astrbot_plugin_hextechmayhem

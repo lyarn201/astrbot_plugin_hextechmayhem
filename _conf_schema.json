@@ -61,6 +61,12 @@
 		"default": 10,
 		"hint": "有效范围 3-50。同时决定 TOP 与 BOTTOM 两榜各显示多少名；只统计上游确实提供了胜率的英雄。"
 	},
+	"image_max_kb": {
+		"description": "报告图片体积上限（KB）",
+		"type": "int",
+		"default": 512,
+		"hint": "有效范围 128-3000。图片消息需要先上传到腾讯的富媒体 CDN，体积过大会导致 NapCat 报 sendMsg 超时。超过上限时按「保持 PNG → 降低 JPEG 质量 → 缩小尺寸」的顺序压缩；调小可提高发送成功率，调大可保留更多细节。"
+	},
 	"proxy": {
 		"description": "访问实时数据源时使用的 HTTP 代理",
 		"type": "string",

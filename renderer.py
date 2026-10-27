@@ -32,9 +32,23 @@ _TIER_LABELS = {
     "Bronze": "青铜阶",
 }
 
+# 报告模板 body 背景色（#050914）。转 JPEG 前用它合成透明像素，
+# 保证视觉上与原图一致。
+_DOC_BACKGROUND = (5, 9, 20)
+# JPEG 质量阶梯：从高到低逐档尝试，命中体积上限即停止。
+_JPEG_QUALITIES = (92, 88, 84, 80, 76, 72, 68)
+# 缩尺寸的下限与步进：低于该宽度文本已经不可读，不再继续压缩。
+_MIN_WIDTH = 720
+_SCALE_STEP = 0.85
+
 
 class ReportRenderer:
     width = 1120
+
+    def __init__(self, max_image_kb: int = 512) -> None:
+        self.max_image_kb = max(64, int(max_image_kb))
+        # 最近一次渲染的体积信息，供调用方记录日志。
+        self.last_render_meta: dict[str, Any] = {}
 
     async def hero_report(
         self,
@@ -390,7 +404,10 @@ class ReportRenderer:
             "device_scale_factor_level": "normal",
         }
         result = await render(source_html, {}, False, options)
-        return normalize_render_result(result)
+        normalized = normalize_render_result(result)
+        data, meta = finalize_image(normalized, max_kb=self.max_image_kb)
+        self.last_render_meta = meta
+        return data
 
     def _document(self, *, title: str, body: str) -> str:
         return f"""<!doctype html>
@@ -756,6 +773,97 @@ def _first_image(images: dict[str, str], *urls: str) -> str:
         if value.startswith("data:image/"):
             return value
     return ""
+
+
+def finalize_image(
+    raw: bytes,
+    *,
+    max_kb: int = 512,
+    max_height: int = 12000,
+) -> tuple[bytes, dict[str, Any]]:
+    """把渲染结果压到聊天平台能稳定上传的体积。
+
+    QQ / NapCat 的图片消息要先把富媒体上传到腾讯的 CDN，体积过大会在一次
+    发送的等待窗口内传不完，表现为
+    ``Timeout: NTEvent ... NodeIKernelMsgService/sendMsg``。
+
+    压缩策略按「尽量少损失清晰度」排序：
+
+    1. 体积已在上限内 → 原样保留 PNG（无损，小图最清晰）；
+    2. 超限 → 逐档降低 JPEG 质量（深色不透明报告转 JPEG 视觉差异很小）；
+    3. 最低质量仍超限 → 按比例缩小尺寸后重新压，直到 ``_MIN_WIDTH``。
+
+    返回值第二项是体积信息（格式 / 宽 / 高 / 字节数），供调用方记录日志。
+    """
+    target = max(64, int(max_kb)) * 1024
+    with PILImage.open(BytesIO(raw)) as source:
+        source.load()
+        image = _flatten_to_rgb(source)
+        if image.height > max_height:
+            ratio = max_height / image.height
+            image = image.resize(
+                (max(1, int(image.width * ratio)), max_height),
+                PILImage.Resampling.LANCZOS,
+            )
+
+        png = _encode_png(image)
+        if len(png) <= target:
+            return png, _image_meta("PNG", image, len(png))
+
+        smallest = png
+        smallest_meta = _image_meta("PNG", image, len(png))
+        current = image
+        for _ in range(6):
+            for quality in _JPEG_QUALITIES:
+                data = _encode_jpeg(current, quality)
+                meta = _image_meta(f"JPEG q{quality}", current, len(data))
+                if len(data) <= target:
+                    return data, meta
+                if len(data) < len(smallest):
+                    smallest, smallest_meta = data, meta
+            if current.width <= _MIN_WIDTH:
+                break
+            width = max(_MIN_WIDTH, int(current.width * _SCALE_STEP))
+            height = max(1, round(current.height * width / current.width))
+            current = current.resize((width, height), PILImage.Resampling.LANCZOS)
+
+        # 压到下限仍超限：返回最小的一版，交给调用方决定是否降级为文字。
+        return smallest, smallest_meta
+
+
+def _flatten_to_rgb(image: "PILImage.Image") -> "PILImage.Image":
+    """统一转成不透明 RGB；带透明通道时按模板背景色合成。"""
+    has_alpha = image.mode in {"RGBA", "LA"} or (
+        image.mode == "P" and "transparency" in image.info
+    )
+    if not has_alpha:
+        return image.convert("RGB")
+    rgba = image.convert("RGBA")
+    canvas = PILImage.new("RGB", rgba.size, _DOC_BACKGROUND)
+    canvas.paste(rgba, mask=rgba.getchannel("A"))
+    return canvas
+
+
+def _encode_png(image: "PILImage.Image") -> bytes:
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _encode_jpeg(image: "PILImage.Image", quality: int) -> bytes:
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+    return output.getvalue()
+
+
+def _image_meta(fmt: str, image: "PILImage.Image", size: int) -> dict[str, Any]:
+    return {
+        "format": fmt,
+        "width": image.width,
+        "height": image.height,
+        "bytes": size,
+        "kb": max(1, round(size / 1024)),
+    }
 
 
 def normalize_render_result(value: Any) -> bytes:

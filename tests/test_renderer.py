@@ -23,12 +23,24 @@ from astrbot_plugin_hextechmayhem.models import (
     RelatedArticle,
     SkillOrderOption,
 )
-from astrbot_plugin_hextechmayhem.renderer import ReportRenderer, normalize_render_result
+from astrbot_plugin_hextechmayhem.renderer import (
+    ReportRenderer,
+    finalize_image,
+    normalize_render_result,
+)
 
 
 def png_bytes() -> bytes:
     output = BytesIO()
     Image.new("RGB", (8, 8), "#123456").save(output, format="PNG")
+    return output.getvalue()
+
+
+def noisy_png(width: int = 1120, height: int = 1600) -> bytes:
+    """生成难以压缩的噪点图，用于模拟长报告页的体积。"""
+    image = Image.effect_noise((width, height), 120).convert("RGB")
+    output = BytesIO()
+    image.save(output, format="PNG")
     return output.getvalue()
 
 
@@ -243,6 +255,60 @@ class RendererTest(unittest.IsolatedAsyncioTestCase):
         source = self.renderer.augment_html([item], {}, query="珠光", total=1, stale=False)
         self.assertNotIn('class="augment-stats"', source)
         self.assertIn("缺失统计不补 0", source)
+
+
+class ImageSizingTest(unittest.IsolatedAsyncioTestCase):
+    """图片体积控制：QQ 富媒体上传对体积敏感，超限会触发发送超时。"""
+
+    def test_small_render_is_kept_as_png(self) -> None:
+        data, meta = finalize_image(png_bytes(), max_kb=512)
+        self.assertTrue(data.startswith(b"\x89PNG"))
+        self.assertEqual(meta["format"], "PNG")
+        self.assertEqual((meta["width"], meta["height"]), (8, 8))
+        self.assertEqual(meta["bytes"], len(data))
+
+    def test_large_render_is_compressed_under_limit(self) -> None:
+        raw = noisy_png()
+        self.assertGreater(len(raw), 512 * 1024, "用例前提：原始图片需超过上限")
+        data, meta = finalize_image(raw, max_kb=512)
+        self.assertLessEqual(len(data), 512 * 1024)
+        self.assertTrue(meta["format"].startswith("JPEG"))
+        # JPEG 以 SOI 标记开头
+        self.assertTrue(data.startswith(b"\xff\xd8"))
+        self.assertGreaterEqual(meta["kb"], 1)
+
+    def test_transparent_pixels_are_flattened_to_theme_background(self) -> None:
+        buffer = BytesIO()
+        Image.new("RGBA", (40, 40), (0, 0, 0, 0)).save(buffer, format="PNG")
+        data, meta = finalize_image(buffer.getvalue(), max_kb=512)
+        self.assertEqual(meta["format"], "PNG")
+        with Image.open(BytesIO(data)) as result:
+            self.assertEqual(result.mode, "RGB")
+            # 模板背景色 #050914
+            self.assertEqual(result.getpixel((5, 5)), (5, 9, 20))
+
+    def test_extreme_target_still_returns_an_image(self) -> None:
+        raw = noisy_png(1000, 1400)
+        data, meta = finalize_image(raw, max_kb=64)
+        self.assertTrue(data)
+        self.assertIn("format", meta)
+        # 下限目标允许压不到，但不能崩溃或返回空
+        self.assertGreater(meta["bytes"], 0)
+
+    async def test_render_applies_configured_limit(self) -> None:
+        renderer = ReportRenderer(max_image_kb=512)
+        raw = noisy_png()
+
+        async def render(*_args, **_kwargs):
+            return raw
+
+        result = await renderer.augment_report(
+            render, [], {}, query="体积测试", total=0, stale=False
+        )
+        self.assertLessEqual(len(result), 512 * 1024)
+        self.assertLess(len(result), len(raw), "压缩后体积应明显小于 PNG 原图")
+        self.assertTrue(renderer.last_render_meta["format"].startswith("JPEG"))
+        self.assertEqual(renderer.last_render_meta["bytes"], len(result))
 
 
 if __name__ == "__main__":
