@@ -13,6 +13,11 @@ import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+
+try:  # AstrBot 4.9+ 的公开路径
+    from astrbot.api.event import MessageChain
+except ImportError:  # 老版本回退到核心路径
+    from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 try:
@@ -93,7 +98,7 @@ class HextechMayhemPlugin(Star):
                 logger.exception("英雄报告渲染失败，降级为文字：%s", error)
                 yield event.plain_result(format_hero_text(report))
                 return
-            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
+            await self._deliver_image(event, image_bytes, format_hero_text(report))
         except (AmbiguousChampion, HextechError) as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -151,7 +156,11 @@ class HextechMayhemPlugin(Star):
                     format_winrate_rankings(top, bottom, stale=stale, source=source)
                 )
                 return
-            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
+            await self._deliver_image(
+                event,
+                image_bytes,
+                format_winrate_rankings(top, bottom, stale=stale, source=source),
+            )
         except HextechError as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -204,7 +213,11 @@ class HextechMayhemPlugin(Star):
                 )
             )
             return
-        yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
+        await self._deliver_image(
+            event,
+            image_bytes,
+            format_augment_text(augments, query=query, total=total, stale=stale),
+        )
 
     @filter.command("海斗排名")
     async def hero_rankings(self, event: AstrMessageEvent):
@@ -227,7 +240,11 @@ class HextechMayhemPlugin(Star):
                     format_champion_rankings(rankings, stale=stale, source=source)
                 )
                 return
-            yield event.chain_result([image_from_bytes(image_bytes, self.renderer.last_render_meta)])
+            await self._deliver_image(
+                event,
+                image_bytes,
+                format_champion_rankings(rankings, stale=stale, source=source),
+            )
         except HextechError as error:
             yield event.plain_result(str(error))
         except asyncio.TimeoutError:
@@ -347,6 +364,45 @@ class HextechMayhemPlugin(Star):
         )
         return images
 
+    async def _send_chain(self, event: AstrMessageEvent, chain: list[Any]) -> None:
+        """发送一条消息链：优先用事件自带的 send，回退到 context.send_message。"""
+        message_chain = MessageChain(chain)
+        sender = getattr(event, "send", None)
+        if callable(sender):
+            await sender(message_chain)
+            return
+        await self.context.send_message(event.unified_msg_origin, message_chain)
+
+    async def _deliver_image(
+        self,
+        event: AstrMessageEvent,
+        image_bytes: bytes,
+        fallback_text: str,
+    ) -> None:
+        """发送报告图片；发送失败时降级为文字。
+
+        QQ 的图片消息要先上传到腾讯的富媒体 CDN，NapCat 侧可能因体积、网络或
+        服务状态报
+        ``Timeout: NTEvent ... NodeIKernelMsgService/sendMsg``。
+        若把发送交给消息调度器，这类异常发生在插件之外，用户会什么都收不到。
+        因此这里改为「显式发送 + 捕获异常 + 文字兜底」。
+        """
+        try:
+            await self._send_chain(
+                event,
+                [image_from_bytes(image_bytes, self.renderer.last_render_meta)],
+            )
+            return
+        except Exception as error:
+            logger.warning(
+                "报告图片发送失败（常见原因：NapCat / QQ 富媒体上传超时），改为文字：%s",
+                error,
+            )
+        try:
+            await self._send_chain(event, [Comp.Plain(_clip_text(fallback_text))])
+        except Exception as error:
+            logger.error("文字兜底也发送失败：%s", error)
+
 
 def extract_command_query(event: AstrMessageEvent, fallback: str, subcommands: set[str]) -> str:
     """Recover the complete query on older AstrBot versions without GreedyStr."""
@@ -390,6 +446,18 @@ def image_from_bytes(data: bytes, meta: dict[str, Any] | None = None):
     if hasattr(Comp.Image, "fromBase64"):
         return Comp.Image.fromBase64(encoded)
     return Comp.Image(file=f"base64://{encoded}")
+
+
+# 文字兜底的长度上限：QQ 单条消息有长度限制，超长会被截断或拒发。
+_MAX_FALLBACK_CHARS = 1500
+
+
+def _clip_text(text: str, limit: int = _MAX_FALLBACK_CHARS) -> str:
+    """按平台长度限制裁剪兜底文字，保留开头最关键的结论部分。"""
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "\n…（内容过长已截断，图片发送失败时的兜底输出）"
 
 
 def format_hero_text(report: HeroReport) -> str:
@@ -451,14 +519,13 @@ def format_hero_text(report: HeroReport) -> str:
                 f"- {item.item.name}"
                 + _stats_values(item.win_rate, item.pick_rate, item.games)
             )
-    lines.append("完整六件套（Mayhempedia 社区攻略）：")
+    # 没有社区路线时不输出空区块，与图片报告保持一致。
     if report.full_builds:
+        lines.append("完整六件套（Mayhempedia 社区攻略）：")
         for route in report.full_builds:
             lines.append(f"- {route.name}：{_items_text(route.items)}")
             if route.note:
                 lines.append(f"  {route.note}")
-    else:
-        lines.append("- 暂无社区六件套；未使用推导组合补齐。")
     if report.provenance:
         lines.append("数据说明：" + "；".join(report.provenance))
     if report.related_articles:

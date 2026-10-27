@@ -61,6 +61,12 @@
 		"default": 10,
 		"hint": "有效范围 3-50。同时决定 TOP 与 BOTTOM 两榜各显示多少名；只统计上游确实提供了胜率的英雄。"
 	},
+	"max_build_variants": {
+		"description": "英雄报告最多展示几套出装流派",
+		"type": "int",
+		"default": 2,
+		"hint": "有效范围 0-4，0 表示不展示流派区块。流派区块是整页报告里最占高度的一块，套数越多 Chromium 渲染越慢；2 套通常已覆盖主要玩法。"
+	},
 	"image_max_kb": {
 		"description": "报告图片体积上限（KB）",
 		"type": "int",

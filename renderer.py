@@ -315,9 +315,16 @@ class ReportRenderer:
                 f'<div><b>相关文章</b><ul>{articles or "<li>暂无相关文章</li>"}</ul></div>'
                 '</div></section>'
             )
-        routes = "".join(_route_card(route, images) for route in report.full_builds)
-        if not routes:
-            routes = '<div class="empty">暂无社区六件套；不会使用推导组合补齐。</div>'
+        # 社区六件套只在真的有数据时才占版面：空区块既不提供信息，又会把整页
+        # 高度顶高，直接推高 Chromium 的渲染时间。
+        route_section = ""
+        if report.full_builds:
+            route_cards = "".join(_route_card(route, images) for route in report.full_builds)
+            route_section = (
+                '<section><div class="section-title"><h2>完整六件套</h2>'
+                f'<span>Mayhempedia 社区攻略 · {len(report.full_builds)} 套</span></div>'
+                f'<div class="route-list">{route_cards}</div></section>'
+            )
 
         return self._document(
             title=f"{champion.name} · 海克斯乱斗",
@@ -342,10 +349,7 @@ class ReportRenderer:
 {variant_section}
 {trio_section}
 {item_section}
-<section>
-  <div class="section-title"><h2>完整六件套</h2><span>Mayhempedia 社区攻略 · 最多 3 套</span></div>
-  <div class="route-list">{routes}</div>
-</section>
+{route_section}
 {provenance_section}
 <footer>英雄封面：Riot Data Dragon · 英雄与海克斯：ARAMGG / CommunityDragon · 统计：ARAMGG / OP.GG · 非官方插件</footer>
 """,

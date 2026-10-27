@@ -389,7 +389,9 @@ class HextechService:
             starter_items=self._with_fallbacks(opgg.starter_items),
             boots=self._items_with_fallbacks(opgg.boots),
             core_builds=self._with_fallbacks(opgg.core_builds),
-            build_variants=self._build_variants_with_fallbacks(opgg.build_variants),
+            build_variants=self._build_variants_with_fallbacks(
+                opgg.build_variants[: self.config.max_build_variants]
+            ),
             augment_trios=opgg.augment_trios,
             item_performance=tuple(
                 replace(item, item=self._items_with_fallbacks((item.item,))[0])

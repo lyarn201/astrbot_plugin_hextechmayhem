@@ -187,6 +187,15 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 压缩本身是**毫秒级**的（1120×3000 约 200ms，1120×5000 约 300ms）：
 大图不尝试无损 PNG，缩放比例由一次探测编码反推，`optimize` 只在最终版本付一次。
 
+> [!IMPORTANT]
+> 实测中**压缩只占总耗时 1–3%**。真正的瓶颈是 AstrBot 的 `html_render`
+> （Chromium 渲染整页 + 截图），它随**页面高度**和**内联图片数量**超线性增长。
+> 整页报告可能高达 8000 px、内联 50 张图，在 2 核容器上单次渲染可达 18 秒。
+>
+> 因此请优先用 `max_build_variants`（流派套数）控制页面高度：少一套流派就少
+> 一整块内容外加十余张内联装备图标。社区六件套在无数据时不再占版面。
+
+
 以 1120×3000 的报告为参考（原始 PNG 约 5.1 MB）：
 
 | `image_max_kb` | 实际输出 | 质量 | 输出尺寸 | 压缩耗时 |
@@ -220,6 +229,7 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 | `mayhem_source` | 国内环境优先使用默认值 `aramgg`；无法使用 ARAMGG 时切换为 `opgg` |
 | `aramgg_api_key` | ARAMGG 模式必填；从开发者后台获取完整的 `hx_live_...` 密钥 |
 | `winrate_rank_size` | 默认 `10`，即 `/海斗胜率` 两端各显示 10 名；有效范围 3–50 |
+| `max_build_variants` | 默认 `2`。流派区块最占版面，套数越多渲染越慢；`0` 可整块隐藏 |
 | `image_max_kb` | 默认 `512`。图片发送超时时调小（如 400）；想保留原分辨率可调到 900 |
 | `image_max_concurrent_requests` | 默认 `8`。首屏等待久可适当调大（上限 32）；图标 CDN 限流则调小 |
 | `llm_provider_id` | 可选；需要识别「奥巴马」「奶妈」等玩家黑话时再选择 Provider |
@@ -241,6 +251,7 @@ ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}
 | `max_results` | `5` | `/海克斯` 搜索最多展示条数；有效范围 1–10 |
 | `max_augments_per_rarity` | `5` | 英雄报告每个稀有度最多展示的海克斯数量；有效范围 1–10 |
 | `winrate_rank_size` | `10` | `/海斗胜率` 两端各显示的英雄数量；有效范围 3–50 |
+| `max_build_variants` | `2` | 英雄报告最多展示几套流派；有效范围 0–4，`0` 表示整块隐藏 |
 | `image_max_kb` | `512` | 报告图片体积上限；有效范围 128–3000。超限时优先缩小尺寸，缩到下限才降质量 |
 | `image_max_concurrent_requests` | `8` | 图标下载并发数；有效范围 1–32。与 API 请求的并发限制相互独立 |
 | `proxy` | 空 | 访问实时数据源时使用的 HTTP 代理，例如 `http://127.0.0.1:7890` |

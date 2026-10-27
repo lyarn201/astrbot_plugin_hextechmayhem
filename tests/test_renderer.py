@@ -229,6 +229,25 @@ class RendererTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("缓存数据", source)
         self.assertIn("暂无数据", source)
 
+    def test_hero_html_omits_route_section_without_full_builds(self) -> None:
+        report = self.report
+        empty = HeroReport(
+            champion=report.champion,
+            patch=report.patch,
+            tier=report.tier,
+            augments=report.augments,
+            build_variants=report.build_variants,
+            full_builds=(),
+        )
+        source = self.renderer.hero_html(empty, {})
+        # 空区块不占版面：既不给信息，又会顶高整页渲染时间
+        self.assertNotIn("完整六件套", source)
+
+    def test_hero_html_keeps_route_section_with_data(self) -> None:
+        source = self.renderer.hero_html(self.report, {})
+        self.assertIn("完整六件套", source)
+        self.assertIn("测试路线", source)
+
     def test_augment_html_renders_stats_when_present(self) -> None:
         item = Augment(
             "1",
