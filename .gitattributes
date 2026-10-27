@@ -1,0 +1,25 @@
+# 统一换行符：仓库内一律 LF，避免 Windows 提交产生 CRLF 噪音
+* text=auto eol=lf
+
+*.py   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.txt  text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+LICENSE         text eol=lf
+NOTICE          text eol=lf
+
+# 二进制资源
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+
+# 让 GitHub 语言统计不把 HTML fixture 当成网页
+tests/fixtures/*.html linguist-language=HTML

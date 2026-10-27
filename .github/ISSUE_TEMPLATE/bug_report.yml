@@ -1,0 +1,95 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先搜索现有 Issue，避免重复。
+
+        > ⚠️ 请勿在 Issue 中粘贴 **ARAMGG API Key**（`hx_live_...`）或包含鉴权头的完整日志。
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: 在 WebUI「插件」页或 metadata.yaml 中查看，例如 v1.2.0
+      placeholder: v1.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: astrbot-version
+    attributes:
+      label: AstrBot 版本
+      description: WebUI 左下角可见，例如 v4.29.3
+      placeholder: v4.29.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: 数据源配置（mayhem_source）
+      options:
+        - aramgg
+        - opgg
+        - 两个都试过
+    validations:
+      required: true
+
+  - type: dropdown
+    id: command
+    attributes:
+      label: 相关指令
+      options:
+        - /海斗胜率
+        - /海斗 <英雄名>
+        - /海斗 <海克斯名>
+        - /海克斯 <海克斯名>
+        - /海斗排名
+        - 插件安装 / 加载
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请写出最小可复现步骤
+      placeholder: |
+        1. 发送 /海斗 亚索
+        2. 等待约 5 秒
+        3. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 有截图更好；文字报错请贴在这里
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: AstrBot「数据与日志 → 日志」中与插件相关的片段（已脱敏）
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 网络环境（国内 / 海外）、是否使用代理、代理配置等

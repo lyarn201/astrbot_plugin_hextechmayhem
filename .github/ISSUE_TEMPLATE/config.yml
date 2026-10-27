@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: AstrBot 插件开发文档
+    url: https://docs.astrbot.app/dev/star/plugin-new.html
+    about: 插件开发、配置 schema、指令注册等通用问题请看官方文档
+  - name: AstrBot 项目主页
+    url: https://github.com/AstrBotDevs/AstrBot
+    about: AstrBot 本体的问题（安装、部署、消息平台接入）请提到上游仓库
+  - name: 上游原版插件
+    url: https://github.com/muyikk/astrbot_plugin_hextechmayhem
+    about: 未改造的原版插件仓库
+  - name: ARAMGG 数据 API 文档
+    url: https://data.dtodo.cn/api/v1/zh-CN/docs/cf-data-api.md
+    about: 数据字段含义、credits 计费、样本门槛等请查阅官方文档

@@ -1,0 +1,24 @@
+# 本文件只承载工具配置（pytest / ruff）。
+# 依赖以 requirements.txt 为准，因为 AstrBot 通过它自动安装插件依赖；
+# 本仓库作为 AstrBot 插件目录直接使用，不通过 pip 打包安装。
+
+[tool.pytest.ini_options]
+# 测试以 `astrbot_plugin_hextechmayhem.xxx` 导入，因此把仓库父目录加入 sys.path。
+pythonpath = [".."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [".git", "__pycache__", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",    # 长行由 formatter 处理，HTML 模板本身较长
+    "B008",    # AstrBot 的 filter.command 装饰器属于框架惯例
+    "SIM108",  # 三元表达式并非总是更清晰
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]

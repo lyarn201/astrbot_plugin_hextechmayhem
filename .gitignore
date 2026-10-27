@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.ruff_cache/
+
+# 构建产物
+build/
+dist/
+*.egg-info/
+
+# 插件运行期数据（实际写入 AstrBot 的 data/plugin_data/，此处仅防御性忽略）
+data/
+cache/
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地配置与密钥（切勿提交真实 API Key）
+.env
+.env.*
+*.local
+
+# 发布用压缩包
+*.zip

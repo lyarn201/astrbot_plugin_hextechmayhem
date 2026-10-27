@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest ruff
+
+      - name: Byte-compile all modules
+        run: python -m compileall -q . -x '(\.git|docs)'
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Lint
+        run: ruff check .
+
+  metadata:
+    name: metadata sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify plugin metadata and packaging limits
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+
+          root = pathlib.Path(".")
+          errors = []
+
+          # metadata.yaml 必须存在且包含关键字段
+          meta_path = root / "metadata.yaml"
+          if not meta_path.is_file():
+              errors.append("缺少 metadata.yaml")
+          else:
+              text = meta_path.read_text(encoding="utf-8")
+              for field in ("name:", "display_name:", "desc:", "version:", "author:", "repo:"):
+                  if field not in text:
+                      errors.append(f"metadata.yaml 缺少字段 {field}")
+
+          # 配置 schema 必须是合法 JSON
+          schema_path = root / "_conf_schema.json"
+          try:
+              json.loads(schema_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              errors.append(f"_conf_schema.json 不是合法 JSON: {exc}")
+
+          # 插件市场限制：zip 不得超过 16MB，这里用仓库体积粗测
+          total = sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and ".git" not in p.parts)
+          if total > 16 * 1024 * 1024:
+              errors.append(f"仓库体积 {total / 1048576:.1f}MB 超过插件市场 16MB 限制")
+
+          if errors:
+              print("\n".join(errors))
+              sys.exit(1)
+          print(f"metadata OK, repo size {total / 1048576:.2f}MB")
+          PY

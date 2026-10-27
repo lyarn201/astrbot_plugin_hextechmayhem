@@ -1,0 +1,47 @@
+This plugin is a modified fork (改造版) of muyikk/astrbot_plugin_hextechmayhem,
+which in turn was inspired by the user-facing features of
+PayneXie/astrbot_plugin_hextech.
+
+Upstream base implementation (GPL-3.0 only):
+  https://github.com/muyikk/astrbot_plugin_hextechmayhem
+  Copyright (C) 2026 muyikk
+
+Feature inspiration:
+  https://github.com/PayneXie/astrbot_plugin_hextech
+
+Modifications in this fork (Copyright (C) 2026 the fork authors) add:
+  - /海斗胜率        two-sided win-rate ranking (TOP / BOTTOM)
+  - augment win-rate and pick-rate display in /海克斯 and /海斗 searches
+  - smart hero-or-augment resolution for /海斗
+  - relaxed Pillow constraint so the plugin can coexist with AstrBot's
+    core dependency version locking
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3. See LICENSE for the complete license text.
+
+--------------------------------------------------------------------------
+Third-party data, services and assets
+
+Champion metadata and splash art are loaded at runtime from Riot Games Data
+Dragon. Champion names, aliases, augment definitions, icons, builds and public
+ARAM: Mayhem statistics are loaded from the ARAMGG Data API. OP.GG
+server-rendered pages remain available as an optional statistics source.
+Those services, data, names, and assets remain subject to their own terms and
+intellectual-property policies.
+
+Optional full-item routes are loaded at runtime from Mayhempedia:
+https://github.com/boxsbraindump/Mayhempedia
+Mayhempedia is distributed under the MIT License. Its route data is presented
+as community-authored guidance and is not represented as OP.GG statistics.
+
+Augment definitions in OP.GG mode are matched against CommunityDragon:
+https://www.communitydragon.org/
+
+No source code or bundled data files from those services are included in this
+repository.
+
+This project is not endorsed by Riot Games and does not reflect the views or
+opinions of Riot Games or anyone officially involved in producing or managing
+League of Legends. League of Legends and Riot Games are trademarks or
+registered trademarks of Riot Games, Inc.
