@@ -93,6 +93,16 @@ class MetadataTest(unittest.TestCase):
         self.assertNotIn("command_group", source)
         self.assertNotIn('@filter.command("hextech")', source)
 
+    def test_image_send_guards_against_false_failure(self) -> None:
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+        # 图片发送必须走可捕获异常的辅助函数
+        self.assertNotIn("yield event.chain_result", source)
+        self.assertEqual(source.count("await self._deliver_image("), 4)
+        # NapCat 会「报超时但图片已送达」，此时不能补发文字，否则重复刷屏
+        self.assertIn("_is_send_timeout_likely_delivered", source)
+        self.assertIn("NodeIKernelMsgService/sendMsg", source)
+        self.assertIn("onMsgInfoListUpdate", source)
+
     def test_mixed_language_and_multiword_query_recovery(self) -> None:
         roots: set[str] = set()
         heroes = {"海斗"}

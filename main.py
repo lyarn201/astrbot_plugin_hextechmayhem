@@ -379,13 +379,15 @@ class HextechMayhemPlugin(Star):
         image_bytes: bytes,
         fallback_text: str,
     ) -> None:
-        """发送报告图片；发送失败时降级为文字。
+        """发送报告图片；仅在**确实没发出去**时降级为文字。
 
-        QQ 的图片消息要先上传到腾讯的富媒体 CDN，NapCat 侧可能因体积、网络或
-        服务状态报
-        ``Timeout: NTEvent ... NodeIKernelMsgService/sendMsg``。
-        若把发送交给消息调度器，这类异常发生在插件之外，用户会什么都收不到。
-        因此这里改为「显式发送 + 捕获异常 + 文字兜底」。
+        QQ 的图片消息要先上传到腾讯的富媒体 CDN。NapCat 有一个已知行为：
+        上传还没结束就判定等待超时，于是返回 retcode 1200
+        ``Timeout: NTEvent ... NodeIKernelMsgService/sendMsg``，
+        但**图片其实已经送达**（NapCatQQ#2120）。这类「假失败」在跨境或低带宽
+        链路上很常见，此时再补发文字就会重复刷屏，因此必须识别出来并跳过兜底。
+
+        对于真正的失败（连接断开、平台拒绝等），才补发文字，避免用户一无所获。
         """
         try:
             await self._send_chain(
@@ -394,10 +396,13 @@ class HextechMayhemPlugin(Star):
             )
             return
         except Exception as error:
-            logger.warning(
-                "报告图片发送失败（常见原因：NapCat / QQ 富媒体上传超时），改为文字：%s",
-                error,
-            )
+            if _is_send_timeout_likely_delivered(error):
+                logger.warning(
+                    "图片发送确认超时，但 NapCat 通常已成功送达；跳过文字兜底以免重复：%s",
+                    error,
+                )
+                return
+            logger.warning("报告图片发送失败，改为发送文字报告：%s", error)
         try:
             await self._send_chain(event, [Comp.Plain(_clip_text(fallback_text))])
         except Exception as error:
@@ -450,6 +455,21 @@ def image_from_bytes(data: bytes, meta: dict[str, Any] | None = None):
 
 # 文字兜底的长度上限：QQ 单条消息有长度限制，超长会被截断或拒发。
 _MAX_FALLBACK_CHARS = 1500
+
+# NapCat 的「假失败」签名：富媒体上传未完成即判定等待超时，但消息实际已送达。
+# 见 NapCatQQ #2120（群内已显示图片，send_group_msg 却返回 1200）与 #869。
+_SEND_TIMEOUT_MARKERS = (
+    "NodeIKernelMsgService/sendMsg",
+    "onMsgInfoListUpdate",
+)
+
+
+def _is_send_timeout_likely_delivered(error: BaseException) -> bool:
+    """判断这个发送异常是否属于「报错了但图片其实已经送达」。"""
+    text = str(error)
+    if not text:
+        return False
+    return all(marker in text for marker in _SEND_TIMEOUT_MARKERS)
 
 
 def _clip_text(text: str, limit: int = _MAX_FALLBACK_CHARS) -> str:
