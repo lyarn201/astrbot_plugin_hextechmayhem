@@ -59,6 +59,9 @@ DDRAGON_CDN = "https://ddragon.leagueoflegends.com/cdn"
 
 _TEXT_LIMIT = 12 * 1024 * 1024
 _IMAGE_LIMIT = 5 * 1024 * 1024
+# ARAMGG 数据请求的重试策略：跨境链路单次失败很常见，重试一次再放弃。
+_JSON_ATTEMPTS = 2
+_JSON_RETRY_DELAY = 0.6
 _TRUSTED_IMAGE_HOSTS = {
     "ddragon.leagueoflegends.com",
     "opgg-static.akamaized.net",
@@ -302,7 +305,7 @@ class HextechService:
                                 payload, self.config.max_augments_per_rarity
                             )
             try:
-                payload = await self._get_json(
+                payload = await self._get_json_with_retry(
                     f"{ARAMGG_BASE_URL}/champions/{key}.json",
                     headers={"Authorization": f"Bearer {self.config.aramgg_api_key}"},
                 )
@@ -693,7 +696,7 @@ class HextechService:
         if disk_payload is not None and disk_version and disk_version == remote_version:
             return disk_payload
         try:
-            payload = await self._get_json(
+            payload = await self._get_json_with_retry(
                 f"{ARAMGG_BASE_URL}/{resource}.json",
                 headers=self._aramgg_headers(),
             )
@@ -713,7 +716,7 @@ class HextechService:
         async with self._aramgg_config_lock:
             if self._aramgg_data_version and time.time() - self._aramgg_version_checked_at < self.config.cache_ttl_seconds:
                 return self._aramgg_data_version
-            payload = await self._get_json(f"{ARAMGG_BASE_URL}/config.json")
+            payload = await self._get_json_with_retry(f"{ARAMGG_BASE_URL}/config.json")
             version = str(payload.get("dataVersion") or "") if isinstance(payload, dict) else ""
             if not version:
                 raise UpstreamUnavailable("ARAMGG config.json 缺少 dataVersion")
@@ -885,6 +888,35 @@ class HextechService:
     async def _get_text(self, url: str, content_types: tuple[str, ...] = (), *, headers: dict[str, str] | None = None) -> str:
         raw = await self._request_bytes(url, _TEXT_LIMIT, content_types, headers=headers)
         return raw.decode("utf-8", errors="replace")
+
+    async def _get_json_with_retry(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        attempts: int = _JSON_ATTEMPTS,
+    ) -> Any:
+        """对瞬时故障重试一次再放弃。
+
+        跨境链路到 ARAMGG（腾讯 EdgeOne）单次超时、连接重置、5xx 都很常见，
+        原来一次失败就判定「没有数据」，用户看到的就是空白报告。
+        鉴权与限流类错误（401/403/429）重试无意义，直接抛出。
+        """
+        last_error: BaseException | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._get_json(url, headers=headers)
+            except aiohttp.ClientResponseError as error:
+                if error.status in {401, 403, 429}:
+                    raise
+                last_error = error
+            except Exception as error:
+                last_error = error
+            if attempt < attempts:
+                await asyncio.sleep(_JSON_RETRY_DELAY * attempt)
+        if last_error is not None:
+            raise last_error
+        raise UpstreamUnavailable(f"上游请求失败：{url}")
 
     async def _request_bytes(
         self,

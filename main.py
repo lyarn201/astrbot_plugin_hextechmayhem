@@ -85,6 +85,12 @@ class HextechMayhemPlugin(Star):
                     yield result
                 return
             report = await self.service.hero_report(champion)
+            if report.unavailable_sources:
+                # 把失败原因写进日志，方便事后排查（图片里也会显示）
+                logger.warning(
+                    "海斗报告存在不可用数据源：%s",
+                    "；".join(report.unavailable_sources),
+                )
             if list_stale and "Data Dragon" not in report.stale_sources:
                 report = replace(
                     report,

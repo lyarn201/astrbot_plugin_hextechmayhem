@@ -8,6 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import aiohttp
+
+import astrbot_plugin_hextechmayhem.hextech_service as hextech_service
 from astrbot_plugin_hextechmayhem.hextech_service import (
     HextechService,
     UpstreamUnavailable,
@@ -324,6 +327,40 @@ class MatchingTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(long_label.endswith("…）"))
         self.assertIn("x" * 48, long_label)
         self.assertNotIn("x" * 49, long_label)
+
+    async def test_json_fetch_retries_once_on_transient_error(self) -> None:
+        service = HextechService(ServiceConfig())
+        calls = {"n": 0}
+
+        async def flaky(url: str, **_: object):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise UpstreamUnavailable("连接被重置")
+            return {"ok": True}
+
+        service._get_json = AsyncMock(side_effect=flaky)
+        original = hextech_service._JSON_RETRY_DELAY
+        hextech_service._JSON_RETRY_DELAY = 0
+        try:
+            result = await service._get_json_with_retry("https://example.invalid/a.json")
+        finally:
+            hextech_service._JSON_RETRY_DELAY = original
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(calls["n"], 2, "瞬时故障应自动重试一次")
+
+    async def test_json_fetch_does_not_retry_auth_or_rate_limit(self) -> None:
+        for status in (401, 403, 429):
+            service = HextechService(ServiceConfig())
+            service._get_json = AsyncMock(
+                side_effect=aiohttp.ClientResponseError(
+                    request_info=None, history=(), status=status
+                )
+            )
+            with self.assertRaises(aiohttp.ClientResponseError):
+                await service._get_json_with_retry("https://example.invalid/a.json")
+            self.assertEqual(
+                service._get_json.await_count, 1, f"{status} 不应重试"
+            )
 
     async def test_opgg_mode_never_loads_aramgg_catalogs(self) -> None:
         service = HextechService(ServiceConfig(mayhem_source="opgg"))
