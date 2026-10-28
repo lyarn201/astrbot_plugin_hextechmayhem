@@ -3,6 +3,30 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1] - 2026-10-28
+
+### 修复
+
+- **文转图偶发返回非图片时直接降级为文字**：线上偶现
+  `ValueError: html_render 返回的内容不是有效图片`
+  （底层 `PIL.UnidentifiedImageError`）。AstrBot 的 `render_custom_template`
+  （即插件的 `html_render`）**直接走网络文转图策略，没有本地兜底**，服务端
+  偶发返回错误页 / 空响应时就会把非图片字节交给插件。
+
+  现在：
+  - **自动重试一次**，偶发抖动能自行恢复，用户不再无谓地掉到文字降级；
+  - 失败时在异常信息里带出**响应字节数与开头预览**，例如
+    `（42 字节，开头：<html><body>502 Bad Gateway</body></html>）`，
+    便于判断是服务不可用、还是网关错误页；
+  - 异常信息补充排查方向：`render_custom_template` 没有本地兜底，
+    需检查文转图配置或自部署服务。
+
+### 其他
+
+- 新增 2 个测试：首次返回错误页时自动重试成功、两次都失败时报错带出服务端返回内容。
+  测试总数 43 → 45。
+- `ReportRenderer.last_render_meta` 在渲染失败时记录 `{"error", "attempt"}`，便于日志排查。
+
 ## [1.3.0] - 2026-10-27
 
 ### 变更

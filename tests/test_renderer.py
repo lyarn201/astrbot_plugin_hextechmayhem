@@ -121,6 +121,32 @@ class RendererTest(unittest.IsolatedAsyncioTestCase):
         result = await self.renderer.hero_report(render, self.report, {})
         self.assertTrue(result.startswith(b"\x89PNG"))
 
+    async def test_render_retries_once_when_payload_is_not_an_image(self) -> None:
+        calls = {"n": 0}
+
+        async def render(*_args, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # 文转图服务偶发返回错误页
+                return b"<html><body>502 Bad Gateway</body></html>"
+            return png_bytes()
+
+        result = await self.renderer.hero_report(render, self.report, {})
+        self.assertTrue(result.startswith(b"\x89PNG"))
+        self.assertEqual(calls["n"], 2, "第一次失败后应自动重试一次")
+
+    async def test_render_surfaces_payload_preview_when_all_attempts_fail(self) -> None:
+        async def render(*_args, **_kwargs):
+            return b"<html><body>t2i service unavailable</body></html>"
+
+        with self.assertRaises(ValueError) as ctx:
+            await self.renderer.hero_report(render, self.report, {})
+        message = str(ctx.exception)
+        # 报错要带出服务端实际返回了什么，否则只能看到「不是有效图片」
+        self.assertIn("t2i service unavailable", message)
+        self.assertIn("2 次", message)
+        self.assertIn("文转图", message)
+
     def test_normalize_supports_base64_data_uri_and_file(self) -> None:
         raw = png_bytes()
         encoded = base64.b64encode(raw).decode("ascii")

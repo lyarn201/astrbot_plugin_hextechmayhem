@@ -443,12 +443,27 @@ class ReportRenderer:
             "device_scale_factor_level": "normal",
         }
         started = time.perf_counter()
-        result = await render(source_html, {}, False, options)
-        normalized = normalize_render_result(result)
-        data, meta = finalize_image(normalized, max_kb=self.max_image_kb)
-        meta["ms"] = round((time.perf_counter() - started) * 1000)
-        self.last_render_meta = meta
-        return data
+        # 文转图是网络服务，偶发会返回错误页 / 空响应。失败一次就重试一次，
+        # 否则用户会直接掉到文字降级，白白丢掉一整张图。
+        attempts = 2
+        for attempt in range(1, attempts + 1):
+            result = await render(source_html, {}, False, options)
+            try:
+                normalized = normalize_render_result(result)
+            except ValueError as error:
+                self.last_render_meta = {
+                    "error": str(error)[:400],
+                    "attempt": attempt,
+                }
+                if attempt < attempts:
+                    continue
+                raise ValueError(f"{error}（共尝试 {attempts} 次）") from error
+            data, meta = finalize_image(normalized, max_kb=self.max_image_kb)
+            meta["ms"] = round((time.perf_counter() - started) * 1000)
+            self.last_render_meta = meta
+            return data
+        # 循环必然在上面 return 或 raise，这里只是让类型检查器满意
+        raise ValueError("html_render 未返回有效图片")
 
     def _document(self, *, title: str, body: str) -> str:
         return f"""<!doctype html>
@@ -974,7 +989,24 @@ def normalize_render_result(value: Any) -> bytes:
             image.save(output, format="PNG", optimize=True)
             return output.getvalue()
     except Exception as error:
-        raise ValueError("html_render 返回的内容不是有效图片") from error
+        raise ValueError(
+            "html_render 返回的内容不是有效图片"
+            f"（{len(raw)} 字节，开头：{_payload_preview(raw)}）。"
+            "常见原因是 AstrBot 的文转图服务不可用或返回了错误页面；"
+            "render_custom_template 没有本地兜底，需检查文转图配置或自部署服务"
+        ) from error
+
+
+def _payload_preview(raw: bytes, limit: int = 120) -> str:
+    """截取非图片响应的开头，便于判断文转图服务到底返回了什么。"""
+    if not raw:
+        return "<空>"
+    try:
+        text = raw[:limit].decode("utf-8", errors="replace")
+    except Exception:
+        return raw[:16].hex(" ")
+    collapsed = " ".join(text.split())
+    return collapsed[:limit] or f"<二进制> {raw[:16].hex(' ')}"
 
 
 def _decode_render_string(value: str) -> bytes:
