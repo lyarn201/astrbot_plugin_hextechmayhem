@@ -283,6 +283,24 @@ class HextechService:
         lock = self._aramgg_locks.setdefault(key, asyncio.Lock())
 
         async def load() -> OpggChampionData:
+            # 单英雄详情每次消耗 2 credits，免费额度每天只有 200（约 100 次）。
+            # 内存缓存随重启清空，因此再叠一层按 dataVersion 失效的磁盘缓存：
+            # 同一补丁内重复查询（含重启后）完全不再消耗额度。
+            path = self._aramgg_champion_cache_path(key)
+            version = ""
+            if path is not None:
+                try:
+                    version = await self._aramgg_remote_version()
+                except Exception:
+                    version = ""
+                cached = await asyncio.to_thread(_read_json_file, path)
+                if version and isinstance(cached, dict):
+                    if str(cached.get("dataVersion") or "") == version:
+                        payload = cached.get("payload")
+                        if isinstance(payload, dict):
+                            return parse_aramgg_champion(
+                                payload, self.config.max_augments_per_rarity
+                            )
             try:
                 payload = await self._get_json(
                     f"{ARAMGG_BASE_URL}/champions/{key}.json",
@@ -292,8 +310,24 @@ class HextechService:
                 if error.status == 401:
                     raise UpstreamUnavailable("ARAMGG API Key 无效或未授权") from error
                 if error.status == 429:
-                    raise UpstreamUnavailable("ARAMGG 请求频率或每日 credits 已达到上限") from error
+                    raise UpstreamUnavailable(
+                        "ARAMGG 请求频率或每日 credits 已达上限（免费 200/天）"
+                    ) from error
                 raise
+            except Exception:
+                # 网络抖动时优先用磁盘上的旧快照，而不是直接报「没有数据」
+                cached = await asyncio.to_thread(_read_json_file, path) if path else None
+                if isinstance(cached, dict) and isinstance(cached.get("payload"), dict):
+                    return parse_aramgg_champion(
+                        cached["payload"], self.config.max_augments_per_rarity
+                    )
+                raise
+            if path is not None and version:
+                await asyncio.to_thread(
+                    _write_json_atomic,
+                    path,
+                    {"dataVersion": version, "payload": payload},
+                )
             return parse_aramgg_champion(payload, self.config.max_augments_per_rarity)
 
         return await self._cached_mapping(
@@ -304,6 +338,14 @@ class HextechService:
             f"{champion.name} ARAMGG 统计",
             "aramgg",
         )
+
+    def _aramgg_champion_cache_path(self, champion_key: str) -> Path | None:
+        if self.cache_dir is None or not champion_key:
+            return None
+        safe_key = "".join(ch for ch in str(champion_key) if ch.isalnum() or ch in "-_")
+        if not safe_key:
+            return None
+        return self.cache_dir / f"aramgg_champion_{safe_key}.json"
 
     async def mayhem_data(self, champion: ChampionSummary, catalog: list[Augment]) -> DataResult:
         if self.config.mayhem_source == "aramgg":
@@ -354,8 +396,8 @@ class HextechService:
             catalog = catalog_result.value
             if catalog_result.stale:
                 stale.append(catalog_label)
-        except Exception:
-            unavailable.append(catalog_label)
+        except Exception as error:
+            unavailable.append(_failure_label(catalog_label, error))
 
         stats_result, route_result = await asyncio.gather(
             self.mayhem_data(champion, catalog),
@@ -366,14 +408,15 @@ class HextechService:
         routes: tuple[FullBuildRoute, ...] = ()
         source_label = "ARAMGG" if self.config.mayhem_source == "aramgg" else "OP.GG"
         if isinstance(stats_result, BaseException):
-            unavailable.append(source_label)
+            # 带上失败原因：只写「ARAMGG」会让人分不清是额度、限流还是网络
+            unavailable.append(_failure_label(source_label, stats_result))
         else:
             opgg = stats_result.value
             if stats_result.stale:
                 stale.append(source_label)
         if isinstance(route_result, BaseException):
             if self.config.enable_mayhempedia_source:
-                unavailable.append("Mayhempedia")
+                unavailable.append(_failure_label("Mayhempedia", route_result))
         else:
             routes = route_result.value
             if route_result.stale:
@@ -895,6 +938,16 @@ class HextechService:
             state = "失败" if error else "未加载"
             age = None
         return {"enabled": True, "state": state, "age": age, "error": error}
+
+
+def _failure_label(label: str, error: BaseException, limit: int = 48) -> str:
+    """把失败原因附在来源名后，便于用户区分额度、限流还是网络问题。"""
+    reason = " ".join(str(error or "").split())
+    if not reason:
+        return label
+    if len(reason) > limit:
+        reason = reason[:limit] + "…"
+    return f"{label}（{reason}）"
 
 
 def _match_champions(items: list[ChampionSummary], needle: str) -> tuple[list[ChampionSummary], list[ChampionSummary]]:

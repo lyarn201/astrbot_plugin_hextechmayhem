@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from astrbot_plugin_hextechmayhem.hextech_service import (
     HextechService,
     UpstreamUnavailable,
+    _failure_label,
     is_cloudflare_challenge,
     is_trusted_image_url,
     normalize_lookup,
@@ -263,6 +264,66 @@ class MatchingTest(unittest.IsolatedAsyncioTestCase):
             loaded = await service._load_aramgg_catalog("champions")
             self.assertEqual(loaded, payload)
             service._get_json.assert_not_awaited()
+
+    async def test_aramgg_champion_stats_use_disk_cache_across_restarts(self) -> None:
+        payload = {
+            "meta": {"gamePatch": "16.21"},
+            "data": {"champion": {"stats": {"tier": 1}}},
+        }
+        champion = ChampionSummary("Yone", "777", "永恩", "封魔剑魂")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            # 第一次：走网络并落盘
+            first = HextechService(
+                ServiceConfig(aramgg_api_key="hx_test"), Path(temporary_dir)
+            )
+            first._aramgg_remote_version = AsyncMock(return_value="16.21.2")
+            first._get_json = AsyncMock(return_value=payload)
+            await first.aramgg_data(champion)
+            self.assertEqual(first._get_json.await_count, 1)
+
+            # 模拟重启：新实例内存缓存为空，但磁盘快照与 dataVersion 一致 → 0 次请求
+            second = HextechService(
+                ServiceConfig(aramgg_api_key="hx_test"), Path(temporary_dir)
+            )
+            second._aramgg_remote_version = AsyncMock(return_value="16.21.2")
+            second._get_json = AsyncMock()
+            result = await second.aramgg_data(champion)
+            self.assertEqual(result.value.tier, "T1")
+            second._get_json.assert_not_awaited()
+
+    async def test_aramgg_champion_stats_fall_back_to_disk_on_network_error(self) -> None:
+        payload = {
+            "meta": {"gamePatch": "16.21"},
+            "data": {"champion": {"stats": {"tier": 2}}},
+        }
+        champion = ChampionSummary("Yone", "777", "永恩", "封魔剑魂")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            first = HextechService(
+                ServiceConfig(aramgg_api_key="hx_test"), Path(temporary_dir)
+            )
+            first._aramgg_remote_version = AsyncMock(return_value="16.21.2")
+            first._get_json = AsyncMock(return_value=payload)
+            await first.aramgg_data(champion)
+
+            # 数据版本变了需要重新拉，但网络挂了 → 退回磁盘旧快照而不是「没有数据」
+            second = HextechService(
+                ServiceConfig(aramgg_api_key="hx_test"), Path(temporary_dir)
+            )
+            second._aramgg_remote_version = AsyncMock(return_value="16.22.0")
+            second._get_json = AsyncMock(side_effect=UpstreamUnavailable("network down"))
+            result = await second.aramgg_data(champion)
+            self.assertEqual(result.value.tier, "T2")
+
+    def test_failure_label_appends_reason(self) -> None:
+        self.assertEqual(
+            _failure_label("ARAMGG", UpstreamUnavailable("credits 已达上限")),
+            "ARAMGG（credits 已达上限）",
+        )
+        self.assertEqual(_failure_label("ARAMGG", UpstreamUnavailable("")), "ARAMGG")
+        long_label = _failure_label("ARAMGG", UpstreamUnavailable("x" * 200))
+        self.assertTrue(long_label.endswith("…）"))
+        self.assertIn("x" * 48, long_label)
+        self.assertNotIn("x" * 49, long_label)
 
     async def test_opgg_mode_never_loads_aramgg_catalogs(self) -> None:
         service = HextechService(ServiceConfig(mayhem_source="opgg"))
